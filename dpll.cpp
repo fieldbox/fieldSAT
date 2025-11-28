@@ -17,6 +17,7 @@ this program. If not, see <https://www.gnu.org/licenses/>.*/
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -37,13 +38,24 @@ int trail_head = 0;     // index of the most recently propagated assignment
 std::vector<Value> assignments; // all assignments, indexed by variable
 int assigned_vars = 0;          // number of variables that are assigned
 
+std::vector<Value> last_assignments; // last assignment to each variable,
+                                     // ignoring backtracking. used when
+                                     // deciding a variable's value, and
+                                     // defaults to false
+
 std::vector<std::vector<Clause *>>
     watchers; // contains lists of all clauses watching a literal, indexed by
               // literal using get_watcher_index()
 
 std::vector<int> trail_decisions; // index of the beginning of each decision
                                   // level in the trail
-std::vector<int> decision_levels; // decision level each variable was assigned
+std::vector<int>
+    decision_levels; // decision level each variable was assigned at
+
+std::vector<std::vector<int>>
+    reasons; // clause that implies each variable's value
+
+std::vector<int> conflict_clause; // most recent conflict clause
 
 std::vector<double> activity; // activity of a variable, indexed by variable
 const double activity_inc =
@@ -82,6 +94,8 @@ bool propagate() {
     int literal = trail[trail_head];
     int index = get_watcher_index(-literal);
 
+    std::cout << "propagating " << literal << "..." << std::endl;
+
     for (int i = 0; i < watchers[index].size();) {
       Clause &clause = *watchers[index][i];
       int watch_num, other_watch;
@@ -93,12 +107,14 @@ bool propagate() {
         other_watch = clause.literals[clause.watch1];
       }
       if (value_of(other_watch) == TRUE) {
+        i++;
         continue; // clause is already satisfied; do nothing
       }
 
       bool changed = false;
       int watch1 = clause.literals[clause.watch1];
       int watch2 = clause.literals[clause.watch2];
+
       for (int j = 0; j < clause.literals.size(); j++) {
         int lit = clause.literals[j];
         if (lit == watch1 || lit == watch2) {
@@ -122,13 +138,20 @@ bool propagate() {
       } // found another non-false literal to watch; do nothing
 
       if (value_of(other_watch) == FALSE) {
+        conflict_clause = clause.literals;
         return false; // all literals are false, conflict found; return false
       } else {
         trail.push_back(other_watch); // all literals but one are false;
                                       // propagate the new unit clause
-        assignments[std::abs(literal)] =
-            literal > 0 ? TRUE : FALSE; // a new unit is being propagated, so we
-                                        // need to assign it
+        assignments[std::abs(other_watch)] =
+            other_watch > 0 ? TRUE : FALSE; // a new unit is being propagated,
+                                            // so we need to assign it
+        std::cout << "assigning " << std::abs(other_watch) << " to "
+                  << (other_watch > 0 ? "TRUE" : "FALSE") << std::endl;
+        last_assignments[std::abs(other_watch)] =
+            other_watch > 0 ? TRUE : FALSE;
+        decision_levels[std::abs(other_watch)] = trail_decisions.size() - 1;
+        reasons[std::abs(other_watch)] = clause.literals;
         assigned_vars++;
         i++;
       }
@@ -136,6 +159,100 @@ bool propagate() {
     trail_head++;
   }
   return true;
+}
+
+void decide() {
+  int highest_activity = 0;
+  int var;
+  for (int i = 1; i < activity.size(); i++) {
+    if (assignments[i] !=
+        UNASSIGNED) { // if a variable has already been assigned,
+      continue;       // we cannot "decide" its value
+    }
+
+    if (activity[i] > highest_activity) {
+      highest_activity = activity[i];
+      var = i;
+    }
+  }
+
+  trail_decisions.push_back(trail.size());
+  int literal =
+      last_assignments[var] == TRUE
+          ? var
+          : -var; // default to false if the variable hasnt been assigned yet
+  trail.push_back(literal);
+  assignments[var] = last_assignments[var];
+  decision_levels[var] = trail_decisions.size() - 1;
+  assigned_vars++;
+
+  std::cout << "deciding " << literal << "..." << std::endl;
+}
+
+std::vector<int> analyse() {
+  int decision_level = trail_decisions.size() - 1;
+  int current_level_count =
+      0; // number of variables in the learned clause that are in the current
+         // decision level. once this hits 1, we have found the first UIP, so we
+         // stop
+
+  for (int literal : conflict_clause) {
+    if (decision_levels[std::abs(literal)] == decision_level)
+      current_level_count++;
+  }
+
+  std::vector<int> learned_clause = conflict_clause;
+  std::vector<bool> seen;
+  seen.resize(num_vars + 1);
+  std::fill(seen.begin(), seen.end(), false);
+
+  for (int i = 0; i < learned_clause.size(); i++) {
+    seen[std::abs(learned_clause[i])] = true;
+  }
+
+  for (int i = trail.size() - 1; i >= 0;
+       i--) { // loop backwards through the trail, performing resolution on the
+              // learned clause on each iteration. essentially, we're replacing
+              // each instance of the literal we find in the trail with the
+              // (unseen) literals in its reason clause
+    if (current_level_count == 1) {
+      break;
+    }
+    int index =
+        std::find(learned_clause.begin(), learned_clause.end(), -trail[i]) -
+        learned_clause.begin();
+    if (index !=
+        learned_clause
+            .size()) { // std::find returns vector.size() if item not found
+      std::vector<int> reason_clause = reasons[std::abs(trail[i])];
+      if (reason_clause.empty()) // decision literals have no reason clause, so
+                                 // we can skip them
+        continue;
+      for (int literal : reason_clause) {
+        if (seen[std::abs(literal)] == false) {
+          seen[std::abs(literal)] = true;
+          learned_clause.push_back(literal);
+          if (decision_levels[std::abs(literal)] == decision_level) {
+            current_level_count++;
+          }
+        }
+      }
+      if (decision_levels[std::abs(learned_clause[index])] == decision_level) {
+        current_level_count--;
+      }
+      learned_clause.erase(learned_clause.begin() + index);
+    }
+  }
+
+  for (int literal : learned_clause) {
+    activity[std::abs(literal)] += activity_inc;
+  }
+
+  for (int i = 0; i < activity.size(); i++) {
+    activity[i] /= activity_decay;
+  }
+
+  return learned_clause;
 }
 
 void parse() {
@@ -166,16 +283,34 @@ void parse() {
                            // they will be given indices for watched literals
     }
   }
+}
+
+void initialise() {
   assignments.resize(num_vars + 1); // the assignment vector is 1-indexed
   std::fill(assignments.begin(), assignments.end(),
             UNASSIGNED); // all variables start unassigned
 
+  last_assignments.resize(num_vars + 1);
+  std::fill(last_assignments.begin(), last_assignments.end(),
+            FALSE); // last assignment defaults to false (since if a variable
+                    // hasn't been assigned before, we try assigning false to it
+                    // first when deciding its value)
+
+  decision_levels.resize(num_vars + 1);
+  std::fill(decision_levels.begin(), decision_levels.end(), 0);
+
+  reasons.resize(num_vars + 1);
+
+  activity.resize(num_vars + 1);
+  std::fill(activity.begin(), activity.end(), 1);
+
   watchers.resize(
       2 * num_vars); // the watchers array is indexed over each literal (i.e.
                      // positive and negative propositional variables)
-}
 
-void initialise() {
+  trail_decisions.push_back(
+      0); // the root decision level begins at trail index 0
+
   for (int i = 0; i < clauses.size(); i++) {
     if (clauses[i].literals.size() == 1) {
       int literal = clauses[i].literals[0];
@@ -199,16 +334,24 @@ bool sat_loop() {
   while (true) {
     if (propagate()) { // propagate unit clauses. if propagate returns true, no
                        // conflict was found
-      if (assigned_vars == num_vars) {
+      if (assigned_vars ==
+          num_vars) { // if all variables have been assigned, satisfiable
         return true;
       } else {
-        // TODO: implement decide() function
-        std::cout << "decide function not implemented" << std::endl;
-        return false; // REMOVE - formulas that need a decision are NOT
-                      // unsatisfiable!
+        decide();
       }
     } else {
       // TODO: implement conflict analysis and backtracking
+      if (trail_decisions.size() - 1 == 0) {
+        return false; // conflict at root decision level means unsat
+      }
+      std::vector<int> learned_clause = analyse();
+      std::cout << "[";
+      for (int i : learned_clause) {
+        std::cout << i << ", ";
+      }
+      std::cout << "]" << std::endl;
+      return false; // REMOVE
     }
   }
 }
