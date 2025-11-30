@@ -251,16 +251,16 @@ std::vector<int> analyse() {
         if (seen[get_literal_index(literal)] == false && literal != trail[i]) {
           seen[get_literal_index(literal)] = true;
           learned_clause.push_back(literal);
+          if (decision_levels[std::abs(literal)] == decision_level) {
+            current_level_count++;
+          }
         }
+      }
+
+      if (decision_levels[std::abs(learned_clause[index])] == decision_level) {
+        current_level_count--;
       }
       learned_clause.erase(learned_clause.begin() + index);
-
-      current_level_count = 0;
-      for (int literal : learned_clause) {
-        if (decision_levels[std::abs(literal)] == decision_level) {
-          current_level_count++;
-        }
-      }
     }
   }
 
