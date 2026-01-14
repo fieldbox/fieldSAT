@@ -76,15 +76,15 @@ const double clause_activity_inc =
 const double clause_activity_decay =
     0.95; // amount to decay clause activity by when a conflict is found
 
-int get_literal_index(int literal) {
-  return (literal > 0)
-             ? 2 * literal - 1
-             : 2 * -literal - 2; // maps the integers (without 0) to the natural
-                                 // numbers (including 0), since we need to keep
-                                 // track of both positive and negative literals
+int get_literal_index(
+    int literal) { // some lists are indexed by literal, which can be positive
+                   // or negative (but not 0). this function maps the positive
+                   // and negative integers to the natural numbers to work as
+                   // indices for these lists.
+  return (literal > 0) ? 2 * literal - 1 : 2 * -literal - 2;
 }
 
-Value value_of(int literal) {
+Value value_of(int literal) { // get the value of a literal
   Value assignment = assignments[std::abs(literal)];
   if (assignment == UNASSIGNED) {
     return UNASSIGNED;
@@ -102,7 +102,8 @@ Value value_of(int literal) {
   }
 }
 
-bool propagate() {
+bool propagate() { // propagate any literals queued in the trail, then the
+                   // literals from any unit clauses onto the trail
   while (trail_head < trail.size()) {
     int literal = trail[trail_head];
     int index = get_literal_index(-literal);
@@ -183,7 +184,7 @@ bool propagate() {
   return true;
 }
 
-void decide() {
+void decide() { // decide the value of one variable, adding it to the trail
   int highest_activity = 0;
   int var;
   for (int i = 1; i < activity.size(); i++) {
@@ -212,7 +213,8 @@ void decide() {
     std::cout << "deciding " << literal << "..." << std::endl;
 }
 
-std::vector<int> analyse() {
+std::vector<int> analyse() { // analyse the conflict and add a learned clause
+                             // that "explains" the conflict
   int decision_level = trail_decisions.size() - 1;
   int current_level_count =
       0; // number of variables in the learned clause that are in the current
@@ -354,7 +356,9 @@ void reduce() { // remove low activity learned clauses
   num_conflicts = 0; // reset the number of conflicts
 }
 
-void backjump(std::vector<int> learned_clause) {
+void backjump(
+    std::vector<int> learned_clause) { // after a conflict, jump back to the
+                                       // decision that caused it
 
   int uip = 0; // after backjumping, the UIP (which is the
                // last element) will be propagated
@@ -426,7 +430,7 @@ void backjump(std::vector<int> learned_clause) {
   }
 }
 
-void parse() {
+void parse() { // parse the DIMACS CNF input
   std::string literal;
 
   while (std::cin >> literal) {
@@ -461,7 +465,7 @@ void parse() {
   }
 }
 
-bool initialise() {
+bool initialise() {                 // initialise any important variables
   assignments.resize(num_vars + 1); // the assignment vector is 1-indexed
   std::fill(assignments.begin(), assignments.end(),
             UNASSIGNED); // all variables start unassigned
@@ -513,7 +517,8 @@ bool initialise() {
   return true;
 }
 
-bool sat_loop() {
+bool sat_loop() { // loop that continually propagates variables, analysing
+                  // conflicts or deciding variables when appropriate
   while (true) {
     if (propagate()) { // propagate unit clauses. if propagate returns true, no
                        // conflict was found
@@ -541,7 +546,8 @@ int main(int argc, char *argv[]) {
     }
   }
   parse();
-  if (!initialise()) {
+  if (!initialise()) { // initialise can return false if it finds two unit
+                       // clauses that contradict each other
     std::cout << "UNSATISFIABLE" << std::endl;
     return 0;
   }
