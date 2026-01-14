@@ -293,17 +293,21 @@ std::vector<int> analyse() {
   return learned_clause;
 }
 
-void reduce() {
+void reduce() { // remove low activity learned clauses
   std::sort(learned_clauses.begin(), learned_clauses.end(),
             [](Clause *ptr1, Clause *ptr2) {
               return (ptr1->activity < ptr2->activity);
-            });
+            }); // sort clauses by activity
 
-  std::vector<Clause *> clauses_to_remove;
+  std::vector<Clause *> clauses_to_remove; // vector containing clause pointers
+                                           // so the memory can be freed later
 
-  for (int i = 0; i < learned_clauses.size() / 2; i++) {
+  for (int i = 0; i < learned_clauses.size() / 2;
+       i++) { // remove half of the learned clauses with the lowest activity
+              // values
     if (reasons[std::abs(learned_clauses[i]->literals[0])] !=
-        learned_clauses[i]) {
+        learned_clauses[i]) { // only remove a clause if it is not currently
+                              // implying the value of a literal
       learned_clauses[i]->toRemove = true;
       clauses_to_remove.push_back(learned_clauses[i]);
     }
@@ -311,7 +315,9 @@ void reduce() {
 
   int old_size = learned_clauses.size();
 
-  for (Clause *c : learned_clauses) {
+  for (Clause *c :
+       learned_clauses) { // remove learned clauses marked with toRemove in the
+                          // previous loop from the watcher list
     if (c->toRemove) {
       for (int index : {c->watch1, c->watch2}) {
         int lit = get_literal_index(c->literals[index]);
@@ -321,6 +327,9 @@ void reduce() {
       }
     }
   }
+
+  // remove clauses marked with toRemove from the learned_clauses and clauses
+  // lists
 
   learned_clauses.erase(std::remove_if(learned_clauses.begin(),
                                        learned_clauses.end(),
@@ -336,13 +345,13 @@ void reduce() {
 
   int new_size = learned_clauses.size();
 
-  for (Clause *ptr : clauses_to_remove) {
+  for (Clause *ptr : clauses_to_remove) { // free memory of removed clauses
     delete ptr;
   }
 
   if (verbose)
     std::cout << "removed " << old_size - new_size << " clauses" << std::endl;
-  num_conflicts = 0;
+  num_conflicts = 0; // reset the number of conflicts
 }
 
 void backjump(std::vector<int> learned_clause) {
